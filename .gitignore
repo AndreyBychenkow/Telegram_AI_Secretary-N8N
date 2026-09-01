@@ -1,0 +1,21 @@
+# Secrets & local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+token.json
+client_secret*.json
+
+# n8n / workflow dumps with credentials
+*.workflow.json
+n8n-export*.json
+**/credentials/**
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
