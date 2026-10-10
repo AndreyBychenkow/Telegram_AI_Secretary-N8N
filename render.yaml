@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: telegram-ai-secretary-n8n
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: "5678"
+      - key: N8N_PORT
+        value: "5678"
+      - key: N8N_PROTOCOL
+        value: https
+      - key: GENERIC_TIMEZONE
+        value: Europe/Moscow
+      - key: TZ
+        value: Europe/Moscow
+      - key: N8N_BLOCK_ENV_ACCESS_IN_NODE
+        value: "false"
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
