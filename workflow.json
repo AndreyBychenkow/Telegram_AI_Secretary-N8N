@@ -1,0 +1,760 @@
+{
+  "id": "P9V40f2WxTtB0X1U",
+  "name": "Telegram AI секретарь: текст/голос + Calendar + Sheets",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Практическое задание: Telegram + AI Agent + Calendar + Sheets\n\nWorkflow принимает текстовые и голосовые сообщения из Telegram, приводит их к единому полю `userText`, отправляет в AI-агента-секретаря и возвращает ответ в Telegram.\n\n**Дополнительно:**\n- голос расшифровывается через Groq Whisper;\n- команда «Запланировать встречу» обрабатывается агентом через Google Calendar Tool;\n- AI-агент подключён к Google Sheets Tool;",
+        "height": 260,
+        "width": 420,
+        "color": 4
+      },
+      "id": "b1a00001-0001-4000-8000-000000000001",
+      "name": "Sticky Note: Описание",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Что настроить после импорта\n\n1. В **Telegram Trigger**, **Telegram: скачать voice-файл**, **Telegram: неподдерживаемый тип** и **Telegram: отправить ответ** выберите ваш **Telegram Bot API** credential (`@my_032_secretary_bot`).\n2. В **Groq Chat Model1** выберите **Groq** credential.\n   В **Groq: расшифровать голос** используется переменная `$env.GROQ_API_KEY` (или укажите `Bearer gsk_...` вручную в заголовке `Authorization`).\n3. В **Google Calendar: создать встречу** выберите **Google Calendar OAuth2** credential.\n4. Во всех **Google Sheets** нодах уже прописан ID таблицы `1wHrs5JeUsBoaCgu5ZvXOUh2ShHbaetiv22Tz12Hm7QA` — просто выберите **Google Sheets OAuth2** credential.\n5. Убедитесь, что в таблице есть листы `Tasks` и `Logs` с заголовками из README.",
+        "height": 300,
+        "width": 430,
+        "color": 3
+      },
+      "id": "b1a00002-0002-4000-8000-000000000002",
+      "name": "Sticky Note: Настройка",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "b1a00003-0003-4000-8000-000000000003",
+      "name": "Telegram Trigger: новое сообщение",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        580
+      ],
+      "webhookId": "telegram-ai-secretary-webhook",
+      "notesInFlow": true,
+      "notes": "Точка входа. Срабатывает на новое сообщение в Telegram."
+    },
+    {
+      "parameters": {
+        "jsCode": "const update = $input.first().json;\nconst msg = update.message || update.edited_message || {};\n\nconst isVoice = Boolean(msg.voice);\nconst isText = Boolean(msg.text);\n\nlet inputType = 'other';\nif (isVoice) inputType = 'voice';\nelse if (isText) inputType = 'text';\n\nreturn [\n  {\n    json: {\n      chat_id: msg.chat?.id ?? '',\n      user_id: msg.from?.id ?? '',\n      username: msg.from?.username || msg.from?.first_name || 'user',\n      input_type: inputType,\n      text: msg.text || '',\n      voice_file_id: msg.voice?.file_id || '',\n      timestamp: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "id": "b1a00004-0004-4000-8000-000000000004",
+      "name": "Нормализовать вход",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        580
+      ],
+      "notesInFlow": true,
+      "notes": "Приводит текстовые и голосовые сообщения к единому формату"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-voice-check",
+              "leftValue": "={{ $json.input_type }}",
+              "rightValue": "voice",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a00005-0005-4000-8000-000000000005",
+      "name": "Тип сообщения — голос?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        620,
+        580
+      ],
+      "notesInFlow": true,
+      "notes": "TRUE — голосовое сообщение"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.voice_file_id }}",
+        "additionalFields": {}
+      },
+      "id": "b1a00006-0006-4000-8000-000000000006",
+      "name": "Telegram: скачать voice-файл",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        820,
+        440
+      ],
+      "notesInFlow": true,
+      "notes": "Получает .oga/.ogg файл из Telegram"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\n\nif (item.binary && item.binary.data) {\n  item.binary.data.fileName = 'voice.ogg';\n  item.binary.data.fileExtension = 'ogg';\n  item.binary.data.mimeType = 'audio/ogg';\n}\n\nreturn [item];"
+      },
+      "id": "b1a00007-0007-4000-8000-000000000007",
+      "name": "Подготовить audio metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        440
+      ],
+      "notesInFlow": true,
+      "notes": "Устанавливает fileName=voice.ogg и mimeType=audio/ogg"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.GROQ_API_KEY || 'REPLACE_WITH_GROQ_API_KEY' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "ru"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a00008-0008-4000-8000-000000000008",
+      "name": "Groq: расшифровать голос",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        440
+      ],
+      "notesInFlow": true,
+      "notes": "POST: https://api.groq.com/openai/v1/audio/transcriptions"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Нормализовать вход').first().json;\nconst whisperText = ($input.first().json.text || '').trim();\n\nreturn [\n  {\n    json: {\n      ...base,\n      text: whisperText,\n      userText: whisperText\n    }\n  }\n];"
+      },
+      "id": "b1a00009-0009-4000-8000-000000000009",
+      "name": "Подготовить voice-текст",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        440
+      ],
+      "notesInFlow": true,
+      "notes": "После расшифровки голоса формирует userText"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-text-check",
+              "leftValue": "={{ $json.input_type }}",
+              "rightValue": "text",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a00010-0010-4000-8000-000000000010",
+      "name": "Тип сообщения — текст?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        820,
+        660
+      ],
+      "notesInFlow": true,
+      "notes": "Отсекает фото, стикеры, файлы и прочие вложения"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst cleanText = (data.text || '').trim();\n\nreturn [\n  {\n    json: {\n      ...data,\n      userText: cleanText\n    }\n  }\n];"
+      },
+      "id": "b1a00011-0011-4000-8000-000000000011",
+      "name": "Подготовить текст",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        640
+      ],
+      "notesInFlow": true,
+      "notes": "Готовит текстовое сообщение в поле userText"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Извините, я поддерживаю только текстовые и голосовые сообщения 🙂 Напишите текстом или запишите голосовое.",
+        "additionalFields": {}
+      },
+      "id": "b1a00012-0012-4000-8000-000000000012",
+      "name": "Telegram: неподдерживаемый тип",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1020,
+        780
+      ],
+      "notesInFlow": true,
+      "notes": "Дружелюбный ответ, если прислали стикер/фото/файл"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst text = (data.userText || '').toLowerCase();\n\nconst isCalendarCommand = /(запланир|встреч|календар|созвон|событи|переговор)/i.test(text);\n\nreturn [\n  {\n    json: {\n      ...data,\n      calendar_command: isCalendarCommand ? 'yes' : 'no'\n    }\n  }\n];"
+      },
+      "id": "b1a00013-0013-4000-8000-000000000013",
+      "name": "Определить команду",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        560
+      ],
+      "notesInFlow": true,
+      "notes": "Определяет фразу «Запланировать встречу» и выставляет calendar_command"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userText }}",
+        "options": {
+          "systemMessage": "=Ты — дружелюбный и лаконичный AI-помощник и личный секретарь в Telegram.\nТекущая дата и время (Europe/Moscow, UTC+3): {{ $now.setZone('Europe/Moscow').toISO() }}.\nID текущего чата (chat_id): {{ $json.chat_id }}.\n\nТвои возможности и правила:\n1. Добавление задачи:\n   Если пользователь просит добавить или записать задачу, вызови инструмент `GoogleSheets_Add_Task` и передай:\n   - `created_at`: текущее время в формате ISO (`{{ $now.setZone('Europe/Moscow').toISO() }}`)\n   - `chat_id`: `{{ $json.chat_id }}`\n   - `task`: краткое описание задачи\n   - `priority`: `high`, `medium` или `low` (переведи с русского: высокий -> high, средний -> medium, низкий -> low; по умолчанию medium)\n   - `deadline`: дата дедлайна в формате `YYYY-MM-DD`\n   - `status`: `new`\n   После добавления ответь в формате:\n   ✅ Задача «...» добавлена в список.\n   📅 Срок: ...\n   ⚡ Приоритет: ...\n\n2. Просмотр списка задач:\n   Если пользователь спрашивает про свои задачи, вызови инструмент `GoogleSheets_Read_Tasks`.\n   Никогда не используй Markdown-таблицы! Выводи задачи красивым нумерованным списком:\n   📋 Список задач\n\n   1. 📝 Задача: <название>\n      ⚡ Приоритет: <высокий/средний/низкий>\n      📅 Срок: <ДД.ММ.ГГГГ>\n      📌 Статус: <новый/в работе/выполнено>\n\n3. Планирование встречи в календаре:\n   Если пользователь просит запланировать встречу или событие, вызови инструмент `Google Calendar: создать встречу`, передав `summary` (название встречи), `start` и `end` в формате ISO 8601 с часовым поясом `+03:00` (если длительность не указана — 1 час).\n   После создания ответь:\n   ✅ Встреча «...» успешно создана в календаре.\n\n   📅 Дата: ...\n   🕒 Время: ЧЧ:ММ – ЧЧ:ММ\n   ⏱️ Продолжительность: ...\n\n4. Обычный диалог:\n   Отвечай по-русски, дружелюбно, коротко и по делу, без громоздкой разметки."
+        }
+      },
+      "id": "b1a00014-0014-4000-8000-000000000014",
+      "name": "AI-агент: помощник и секретарь",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1780,
+        460
+      ],
+      "notesInFlow": true,
+      "notes": "Главный агент. Подключены Groq, память, Calendar и Sheets"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "b1a00015-0015-4000-8000-000000000015",
+      "name": "Groq Chat Model1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Определить команду').item.json.chat_id }}",
+        "contextWindowLength": 10
+      },
+      "id": "b1a00016-0016-4000-8000-000000000016",
+      "name": "Память диалога",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1800,
+        760
+      ],
+      "notesInFlow": true,
+      "notes": "Хранит последние 10 сообщений диалога"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "Primary"
+        },
+        "start": "={{ $fromAI('start', 'Start date and time in ISO 8601 format, e.g. 2026-09-02T15:00:00+03:00', 'string') }}",
+        "end": "={{ $fromAI('end', 'End date and time in ISO 8601 format, e.g. 2026-09-02T16:00:00+03:00', 'string') }}",
+        "additionalFields": {
+          "summary": "={{ $fromAI('summary', 'Meeting title / summary', 'string') }}"
+        }
+      },
+      "id": "b1a00017-0017-4000-8000-000000000017",
+      "name": "Google Calendar: создать встречу",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.2,
+      "position": [
+        1960,
+        760
+      ],
+      "notesInFlow": true,
+      "notes": "AI Tool. Вызывается агентом для создания события"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1wHrs5JeUsBoaCgu5ZvXOUh2ShHbaetiv22Tz12Hm7QA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tasks",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "b1a00018-0018-4000-8000-000000000018",
+      "name": "GoogleSheets_Read_Tasks",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.5,
+      "position": [
+        2120,
+        760
+      ],
+      "notesInFlow": true,
+      "notes": "AI Tool. Позволяет агенту читать задачи из листа Tasks"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1wHrs5JeUsBoaCgu5ZvXOUh2ShHbaetiv22Tz12Hm7QA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tasks",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "created_at": "={{ $fromAI('created_at', 'Creation timestamp in ISO 8601 format', 'string') }}",
+            "chat_id": "={{ $fromAI('chat_id', 'Telegram chat_id', 'string') }}",
+            "task": "={{ $fromAI('task', 'Task description', 'string') }}",
+            "priority": "={{ $fromAI('priority', 'Task priority: high, medium, or low', 'string') }}",
+            "deadline": "={{ $fromAI('deadline', 'Deadline date in YYYY-MM-DD format', 'string') }}",
+            "status": "={{ $fromAI('status', 'Task status, default is new', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "chat_id",
+              "displayName": "chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "task",
+              "displayName": "task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "deadline",
+              "displayName": "deadline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a00019-0019-4000-8000-000000000019",
+      "name": "GoogleSheets_Add_Task",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.5,
+      "position": [
+        2280,
+        760
+      ],
+      "notesInFlow": true,
+      "notes": "AI Tool. Агент добавляет новую задачу в лист Tasks"
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Определить команду').first().json;\nconst agentOut = $input.first().json;\n\nreturn [\n  {\n    json: {\n      timestamp: new Date().toISOString(),\n      chat_id: meta.chat_id,\n      user_id: meta.user_id,\n      username: meta.username,\n      input_type: meta.input_type,\n      user_message: meta.userText,\n      assistant_reply: agentOut.output || '',\n      calendar_command: meta.calendar_command || 'no'\n    }\n  }\n];"
+      },
+      "id": "b1a00020-0020-4000-8000-000000000020",
+      "name": "Сформировать лог",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        440
+      ],
+      "notesInFlow": true,
+      "notes": "Преобразует диалог в строку для листа Logs"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1wHrs5JeUsBoaCgu5ZvXOUh2ShHbaetiv22Tz12Hm7QA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Logs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "b1a00021-0021-4000-8000-000000000021",
+      "name": "Google Sheets: лог диалога",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2280,
+        440
+      ],
+      "notesInFlow": true,
+      "notes": "Записывает входящее сообщение и ответ агента в лист Logs"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Определить команду').item.json.chat_id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "id": "b1a00022-0022-4000-8000-000000000022",
+      "name": "Telegram: отправить ответ",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2100,
+        600
+      ],
+      "notesInFlow": true,
+      "notes": "Отправляет итоговый ответ пользователю в Telegram"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger: новое сообщение": {
+      "main": [
+        [
+          {
+            "node": "Нормализовать вход",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нормализовать вход": {
+      "main": [
+        [
+          {
+            "node": "Тип сообщения — голос?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тип сообщения — голос?": {
+      "main": [
+        [
+          {
+            "node": "Telegram: скачать voice-файл",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Тип сообщения — текст?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: скачать voice-файл": {
+      "main": [
+        [
+          {
+            "node": "Подготовить audio metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовить audio metadata": {
+      "main": [
+        [
+          {
+            "node": "Groq: расшифровать голос",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq: расшифровать голос": {
+      "main": [
+        [
+          {
+            "node": "Подготовить voice-текст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовить voice-текст": {
+      "main": [
+        [
+          {
+            "node": "Определить команду",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Тип сообщения — текст?": {
+      "main": [
+        [
+          {
+            "node": "Подготовить текст",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: неподдерживаемый тип",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовить текст": {
+      "main": [
+        [
+          {
+            "node": "Определить команду",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Определить команду": {
+      "main": [
+        [
+          {
+            "node": "AI-агент: помощник и секретарь",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-агент: помощник и секретарь": {
+      "main": [
+        [
+          {
+            "node": "Сформировать лог",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram: отправить ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сформировать лог": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: лог диалога",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI-агент: помощник и секретарь",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Память диалога": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI-агент: помощник и секретарь",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar: создать встречу": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI-агент: помощник и секретарь",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoogleSheets_Read_Tasks": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI-агент: помощник и секретарь",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoogleSheets_Add_Task": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI-агент: помощник и секретарь",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Moscow",
+    "saveManualExecutions": true
+  },
+  "versionId": "d554262a-0000-4000-8000-000000000001",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
