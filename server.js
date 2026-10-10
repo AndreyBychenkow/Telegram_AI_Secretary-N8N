@@ -22,8 +22,54 @@ const GOOGLE_SCRIPT_URL = (process.env.GOOGLE_SCRIPT_URL || '').trim();
 // Вариант 2 (опционально): JSON сервисного аккаунта Google
 const GOOGLE_SERVICE_ACCOUNT_JSON = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '').trim();
 
-const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
 const GROQ_WHISPER_MODEL = process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo';
+
+// Список моделей по приоритету + автоопределение доступной модели через /v1/models
+const FALLBACK_CHAT_MODELS = [
+  'openai/gpt-oss-120b',
+  'meta-llama/llama-4-maverick-17b-128e-instruct',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
+  'qwen/qwen3-32b',
+  'llama-3.1-8b-instant',
+  'openai/gpt-oss-20b',
+];
+let resolvedChatModel = null;
+
+async function resolveWorkingGroqModel() {
+  if (resolvedChatModel) return resolvedChatModel;
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const availableIds = (data.data || []).map((m) => m.id);
+      if (availableIds.includes(GROQ_CHAT_MODEL)) {
+        resolvedChatModel = GROQ_CHAT_MODEL;
+        return resolvedChatModel;
+      }
+      for (const candidate of FALLBACK_CHAT_MODELS) {
+        if (availableIds.includes(candidate)) {
+          resolvedChatModel = candidate;
+          console.log(`[groq] Выбрана доступная модель: ${resolvedChatModel}`);
+          return resolvedChatModel;
+        }
+      }
+      const firstChatModel = availableIds.find(
+        (id) => !id.includes('whisper') && !id.includes('guard') && !id.includes('tts')
+      );
+      if (firstChatModel) {
+        resolvedChatModel = firstChatModel;
+        console.log(`[groq] Автоматически выбрана модель: ${resolvedChatModel}`);
+        return resolvedChatModel;
+      }
+    }
+  } catch (err) {
+    console.error('[groq] Ошибка получения списка моделей:', err.message);
+  }
+  return GROQ_CHAT_MODEL;
+}
 const TIMEZONE = process.env.TZ || process.env.GENERIC_TIMEZONE || 'Europe/Moscow';
 
 // Локальное хранилище (резерв + работа даже без настроенного Google API)
@@ -541,8 +587,9 @@ ID текущего чата (chat_id): ${chatId}.
   const messages = [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: userText }];
 
   const callGroq = async (msgs, useTools = true) => {
+    const modelToUse = await resolveWorkingGroqModel();
     const body = {
-      model: GROQ_CHAT_MODEL,
+      model: modelToUse,
       messages: msgs,
       temperature: 0.3,
     };
