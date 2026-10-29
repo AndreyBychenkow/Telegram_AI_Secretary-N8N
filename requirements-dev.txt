@@ -1,0 +1,6 @@
+-r requirements.txt
+tzdata
+pytest
+ruff
+mypy
+types-requests

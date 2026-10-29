@@ -1,0 +1,31 @@
+[project]
+name = "telegram-ai-secretary"
+version = "1.0.0"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["bot", "deploy", "wsgi.py"]
+
+[[tool.mypy.overrides]]
+module = ["google.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["bot.google_api"]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["bot/tests", "deploy/tests"]
