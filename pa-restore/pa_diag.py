@@ -98,11 +98,30 @@ def password_form(html: str) -> dict | None:
     return None
 
 
-def snippet(html: str, anchor: str, before: int = 2500, after: int = 2500) -> str:
-    index = html.find(anchor)
-    if index == -1:
-        return "(фрагмент не найден)"
-    return scrub(html[max(0, index - before): index + after])
+def form_block(html: str, needle: str = 'name="old_password"') -> str:
+    """Возвращает HTML того <form>, внутри которого есть нужное поле."""
+    for match in re.finditer(r"<form\b", html, re.IGNORECASE):
+        end = html.find("</form>", match.start())
+        if end == -1:
+            continue
+        block = html[match.start(): end + 7]
+        if needle in block:
+            return scrub(block)
+    return "(форма не найдена)"
+
+
+def contexts(html: str, needles: tuple[str, ...], width: int = 220, limit: int = 6) -> list[str]:
+    """Куски текста вокруг ключевых слов (для поиска сообщений об ошибке)."""
+    text = scrub(re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I))
+    found: list[str] = []
+    for needle in needles:
+        for match in re.finditer(re.escape(needle), text, re.IGNORECASE):
+            fragment = " ".join(text[max(0, match.start() - width): match.start() + width].split())
+            if fragment and fragment not in found:
+                found.append(fragment)
+            if len(found) >= limit:
+                return found
+    return found
 
 
 def main() -> int:
@@ -153,10 +172,16 @@ def main() -> int:
     print("Ответ на смену пароля: HTTP %s, адрес %s" % (response.status_code, response.url.replace(base, "")))
 
     if mode == "diag":
-        print("\n===== HTML вокруг old_password в ОТВЕТЕ =====")
-        print(snippet(response.text, "old_password"))
-        print("\n===== HTML вокруг old_password на ИСХОДНОЙ странице =====")
-        print(snippet(page.text, "old_password", before=800, after=1500))
+        print("\n===== БЛОК ФОРМЫ в ОТВЕТЕ =====")
+        print(form_block(response.text))
+        print("\n===== СООБЩЕНИЯ ОБ ОШИБКАХ в ОТВЕТЕ =====")
+        for fragment in contexts(
+            response.text,
+            ("errorlist", 'class="error', "alert", "invalid", "incorrect", "must ", "password", "changed"),
+        ):
+            print("  *", fragment)
+        print("\n===== БЛОК ФОРМЫ на ИСХОДНОЙ странице (для сравнения) =====")
+        print(form_block(page.text))
 
     with requests.Session() as check:
         check.headers["User-Agent"] = "pa-diag/1.0"
