@@ -52,11 +52,18 @@ class FormParser(HTMLParser):
         if tag == "form":
             self._current = {"action": attributes.get("action", ""), "fields": []}
             self.forms.append(self._current)
-        elif tag in ("input", "textarea", "select") and self._current is not None:
+        elif tag in ("input", "textarea", "select", "button") and self._current is not None:
             name = attributes.get("name")
             if name:
+                # Django различает несколько форм на странице по имени нажатой кнопки,
+                # поэтому кнопки с name тоже нужно отправлять.
+                default_type = "submit" if tag == "button" else "text"
                 self._current["fields"].append(
-                    {"name": name, "type": attributes.get("type", "text").lower(), "value": attributes.get("value", "")}
+                    {
+                        "name": name,
+                        "type": attributes.get("type", default_type).lower(),
+                        "value": attributes.get("value", ""),
+                    }
                 )
 
     def handle_endtag(self, tag: str) -> None:
