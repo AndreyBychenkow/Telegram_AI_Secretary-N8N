@@ -1,0 +1,37 @@
+name: PA restore diag
+
+# Тонкий запуск pa-restore/pa_diag.py: диагностика и смена пароля PythonAnywhere.
+# Режим diag печатает сырой HTML вокруг формы смены пароля (значения вырезаны).
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "diag или change"
+        required: false
+        default: diag
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install "requests>=2.32,<3"
+
+      - name: Run diagnostic
+        env:
+          PA_USERNAME: ${{ secrets.PA_USERNAME }}
+          PA_PASSWORD: ${{ secrets.PA_PASSWORD }}
+          NEW_PA_PASSWORD: ${{ secrets.NEW_PA_PASSWORD }}
+          MODE: ${{ inputs.mode }}
+        run: python pa-restore/pa_diag.py
