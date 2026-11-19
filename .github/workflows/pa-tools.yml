@@ -1,0 +1,32 @@
+name: PA tools
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "diag | change | email"
+        required: false
+        default: diag
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install "requests>=2.32,<3"
+      - name: Run
+        env:
+          PA_USERNAME: ${{ secrets.PA_USERNAME }}
+          PA_PASSWORD: ${{ secrets.PA_PASSWORD }}
+          NEW_PA_PASSWORD: ${{ secrets.NEW_PA_PASSWORD }}
+          NEW_PA_EMAIL: ${{ secrets.NEW_PA_EMAIL }}
+          MODE: ${{ inputs.mode }}
+        run: python pa-restore/pa_tools.py
