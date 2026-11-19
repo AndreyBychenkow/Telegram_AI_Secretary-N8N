@@ -206,6 +206,17 @@ def main() -> int:
     page = session.get(account_url, timeout=TIMEOUT)
     print("Страница аккаунта: HTTP %s" % page.status_code)
 
+    if mode == "status":
+        emails = sorted({mask_email(e) for e in EMAIL_RE.findall(page.text)})
+        print("Почта в аккаунте (замаскирована): %s" % ", ".join(emails[:5]))
+        for form in parse_forms(page.text):
+            names = [f["name"] for f in form["fields"]]
+            if "email" in names:
+                for field in form["fields"]:
+                    if field["name"] == "email" and field.get("value"):
+                        print("Поле email на странице: %s" % mask_email(field["value"]))
+        return 0
+
     if mode == "diag":
         for form in parse_forms(page.text):
             print("  форма: action=%r поля=%s" % (form["action"], [f["name"] for f in form["fields"]]))
