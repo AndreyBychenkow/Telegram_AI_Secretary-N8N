@@ -1,26 +1,29 @@
-# Отчёт восстановления доступа PythonAnywhere
+# Отчёт (диагностика смены пароля)
 
-Сформирован: 2026-11-19 06:59 UTC
+Сформирован: 2026-11-19 07:09 UTC
 
 ```
 Логин: decebell032rus
-Хост: https://www.pythonanywhere.com
-Вход старым паролем: успешно (пароль из секрета рабочий)
+Вход старым паролем: успешно
 
-## Страницы аккаунта
+## Формы на странице аккаунта (/user/decebell032rus/account/ -> HTTP 200)
+  форма 1: action='/logout/' method=post поля=[('csrfmiddlewaretoken', 'hidden')]
+  форма 2: action='/logout/' method=post поля=[('csrfmiddlewaretoken', 'hidden')]
+  форма 3: action='/start_custom_plan_upgrade/' method=post поля=[('csrfmiddlewaretoken', 'hidden'), ('term', 'hidden'), ('postgres_enabled', 'checkbox')]
+  форма 4: action='.' method=post поля=[('csrfmiddlewaretoken', 'hidden'), ('old_password', 'password'), ('new_password1', 'password'), ('new_password2', 'password')]
+  форма 5: action='.' method=post поля=[('csrfmiddlewaretoken', 'hidden'), ('email', 'text')]
+  форма 6: action='.' method=post поля=[('csrfmiddlewaretoken', 'hidden'), ('subscribed_engagement_emails', 'checkbox'), ('subscribed_downtime_alerts', 'checkbox'), ('subscribed_resource_warnings', 'checkbox'), ('subscribed_teacher_nomination_alerts', 'checkbox'), ('subscribed_newsletter', 'checkbox')]
+  форма 7: action='/user/decebell032rus/api/new_token' method=post поля=[('csrfmiddlewaretoken', 'hidden')]
+  форма смены пароля: action='.' -> отправляем на https://www.pythonanywhere.com/user/decebell032rus/account/
 
-/user/decebell032rus/account/ -> HTTP 200
-  почта на странице (замаскирована): d***@c***.com
-  форма с паролем: action=. поля=['csrfmiddlewaretoken', 'new_password1', 'new_password2', 'old_password']
+## Попытка смены пароля
+  кандидатов: 1 (длины: [15])
+  --- попытка 1 (длина 15) ---
+  поля, которые считали старым паролем: ['old_password']
+  поля, которые считали новым паролем: ['new_password1', 'new_password2']
+  ответ на попытку смены: HTTP 200, Location: (нет)
+  текст страницы: ['Change your password:', 'Change password', 'if someone steals or guesses your password, they', "if we can't collect payment for a paid account, or", 'We review all feedback, but we cannot promise a response.', 'What actually happened including any error messages or screenshots.', 'Thank you for your feedback. We review all feedback, but we cannot promise a response.']
+  вход новым паролем: не удалось
 
-/user/decebell032rus/webapps/ -> HTTP 200
-  срок веб-приложения: Wednesday 16 December 2026
-
-## Смена пароля
-Форма найдена: /user/decebell032rus/account/
-Кандидатов в секрете NEW_PA_PASSWORD: 1, отброшено как заметки: 0 (пробуем по порядку, значения не печатаются)
-  попытка 1 (длина 15): не удалось войти новым паролем
-
-РЕЗУЛЬТАТ: ни одно значение не подошло. Пароль не изменён.
-Скорее всего в секрете NEW_PA_PASSWORD лишний текст или пароль не соответствует требованиям PA.
+РЕЗУЛЬТАТ: смена пароля не удалась, пароль не изменён.
 ```
