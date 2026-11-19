@@ -1,9 +1,9 @@
-name: Restore PythonAnywhere access
+name: Restore PythonAnywhere access v2
 
-# Возврат доступа к PythonAnywhere без поддержки.
-# Логинится паролем из секрета PA_PASSWORD и меняет его на значение из NEW_PA_PASSWORD.
-# Отчёт (без паролей, почта замаскирована) коммитится в pa-restore-report.txt.
-# После успеха: обновить секрет PA_PASSWORD новым паролем и удалить этот workflow.
+# Диагностика смены пароля на PythonAnywhere.
+# Входит паролем из PA_PASSWORD, подробно показывает форму смены пароля, пробует сменить
+# на значение из NEW_PA_PASSWORD и печатает ТЕКСТ ошибки, если PA отклонил смену.
+# Пароли в отчёт не попадают; адреса почты маскируются.
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: pip install "requests>=2.32,<3"
 
-      - name: Restore access
+      - name: Diagnose and change
         run: |
           python - <<'PY'
           import os
@@ -48,6 +48,11 @@ jobs:
               r'class="[^"]*webapp_expiry[^"]*"[^>]*>.*?<strong>\s*([^<]+?)\s*</strong>', re.S
           )
           EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+          KEYWORDS = (
+              "error", "invalid", "incorrect", "wrong", "too short", "too long", "common",
+              "weak", "must", "cannot", "can't", "changed", "success", "неверн", "нельзя",
+              "должен", "слаб", "измен",
+          )
 
           report_lines = []
 
@@ -58,11 +63,9 @@ jobs:
 
 
           def write_report():
-              header = "# Отчёт восстановления доступа PythonAnywhere"
               stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
               with open(REPORT, "w", encoding="utf-8") as handle:
-                  handle.write(header + "\n\n")
-                  handle.write("Сформирован: " + stamp + "\n\n```\n")
+                  handle.write("# Отчёт (диагностика смены пароля)\n\nСформирован: " + stamp + "\n\n```\n")
                   handle.write("\n".join(report_lines) + "\n```\n")
 
 
@@ -91,10 +94,23 @@ jobs:
               def handle_starttag(self, tag, attrs):
                   attributes = {key: value or "" for key, value in attrs}
                   if tag == "form":
-                      self.current = {"action": attributes.get("action", "")}
+                      self.current = {
+                          "action": attributes.get("action", ""),
+                          "method": (attributes.get("method", "get") or "get").lower(),
+                          "enctype": attributes.get("enctype", ""),
+                          "fields": [],
+                      }
                       self.forms.append(self.current)
-                  elif tag == "input" and self.current is not None and attributes.get("name"):
-                      self.current[attributes["name"]] = attributes.get("value", "")
+                  elif tag in ("input", "textarea", "select") and self.current is not None:
+                      name = attributes.get("name")
+                      if name:
+                          self.current["fields"].append(
+                              {
+                                  "name": name,
+                                  "type": attributes.get("type", "text").lower(),
+                                  "value": attributes.get("value", ""),
+                              }
+                          )
 
               def handle_endtag(self, tag):
                   if tag == "form":
@@ -107,106 +123,96 @@ jobs:
               return parser.forms
 
 
+          def field_names(form):
+              return [field["name"] for field in form["fields"]]
+
+
           def login(session, base, username, password):
               login_url = base + "/login/"
               page = session.get(login_url, timeout=TIMEOUT)
               page.raise_for_status()
-              form = next((f for f in parse_forms(page.text) if "auth-username" in f), None)
-              if form is None or CSRF not in form:
-                  raise RuntimeError("форма входа не найдена — изменилась вёрстка PythonAnywhere")
-              response = session.post(
-                  login_url,
-                  data={
-                      CSRF: form[CSRF],
-                      "login_view-current_step": "auth",
-                      "auth-username": username,
-                      "auth-password": password,
-                  },
-                  headers={"Referer": login_url},
-                  timeout=TIMEOUT,
-              )
+              form = next((f for f in parse_forms(page.text) if "auth-username" in field_names(f)), None)
+              if form is None:
+                  raise RuntimeError("форма входа не найдена")
+              data = {"login_view-current_step": "auth", "auth-username": username, "auth-password": password}
+              for field in form["fields"]:
+                  if field["name"] == CSRF:
+                      data[CSRF] = field["value"]
+              response = session.post(login_url, data=data, headers={"Referer": login_url}, timeout=TIMEOUT)
               response.raise_for_status()
-              if any(f.get("login_view-current_step") == "token" for f in parse_forms(response.text)):
-                  raise RuntimeError("включена двухфакторная авторизация — вход скриптом невозможен")
-              if "/login" in response.url or "log out" not in response.text.lower():
-                  return False
-              return True
+              for form in parse_forms(response.text):
+                  for field in form["fields"]:
+                      if field["name"] == "login_view-current_step" and field["value"] == "token":
+                          raise RuntimeError("включена двухфакторная авторизация")
+              return "/login" not in response.url and "log out" in response.text.lower()
 
 
-          def diagnose(session, base, username):
-              rec("")
-              rec("## Страницы аккаунта")
-              seen = set()
-              for path in ("/user/%s/account/" % username, "/user/%s/webapps/" % username):
-                  page = session.get(urljoin(base, path), timeout=TIMEOUT)
-                  rec("")
-                  rec("%s -> HTTP %s" % (path, page.status_code))
-                  if page.status_code != 200:
+          def plain_text(html):
+              text = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
+              text = re.sub(r"<style.*?</style>", " ", text, flags=re.S | re.I)
+              text = re.sub(r"<[^>]+>", "\n", text)
+              text = re.sub(r"&nbsp;?", " ", text)
+              text = re.sub(r"&amp;", "&", text)
+              text = re.sub(r"\n{2,}", "\n", text)
+              return scrub(text.strip())
+
+
+          def relevant_lines(html, limit=12):
+              out = []
+              for line in plain_text(html).split("\n"):
+                  line = line.strip()
+                  if not line or len(line) > 300:
                       continue
-                  for expiry in EXPIRY_RE.findall(page.text):
-                      text = "срок веб-приложения: " + expiry.strip()
-                      if text not in seen:
-                          seen.add(text)
-                          rec("  " + text)
-                  emails = sorted({mask_email(e) for e in EMAIL_RE.findall(page.text)})
-                  if emails:
-                      rec("  почта на странице (замаскирована): " + ", ".join(emails[:5]))
-                  for form in parse_forms(page.text):
-                      names = sorted(key for key in form if key != "action")
-                      if not any("pass" in name.lower() for name in names):
-                          continue
-                      rec("  форма с паролем: action=%s поля=%s" % (form["action"] or "(та же страница)", names))
+                  low = line.lower()
+                  if any(key in low for key in KEYWORDS) or "pass" in low:
+                      if line not in out:
+                          out.append(line)
+              return out[:limit]
 
 
-          def find_password_form(session, base, username):
-              for path in ("/user/%s/account/" % username, "/user/%s/account/password/" % username):
-                  page = session.get(urljoin(base, path), timeout=TIMEOUT)
-                  if page.status_code != 200:
-                      continue
-                  for form in parse_forms(page.text):
-                      names = [key for key in form if key != "action"]
-                      if sum("pass" in name.lower() for name in names) < 2:
-                          continue
-                      action = urljoin(base, form["action"] or path)
-                      return path, form, action
-              return None
-
-
-          def try_change(session, base, username, path, form, action, new_password):
-              names = [key for key in form if key != "action"]
-              old_like = ("current", "old", "existing")
+          def try_change(session, base, username, form, action, new_password):
+              names = field_names(form)
+              old_like = ("old", "current", "existing")
               new_fields = [
-                  name
-                  for name in names
-                  if name != CSRF
-                  and "pass" in name.lower()
+                  name for name in names
+                  if name != CSRF and "pass" in name.lower()
                   and not any(needle in name.lower() for needle in old_like)
               ]
-              old_fields = [name for name in names if name != CSRF and any(n in name.lower() for n in old_like)]
-              if not new_fields:
-                  raise RuntimeError("не нашлось поле нового пароля среди %s" % names)
-              data = {CSRF: form.get(CSRF, "")}
-              for name in names:
+              old_fields = [
+                  name for name in names if name != CSRF and any(needle in name.lower() for needle in old_like)
+              ]
+              rec("  поля, которые считали старым паролем: %s" % old_fields)
+              rec("  поля, которые считали новым паролем: %s" % new_fields)
+
+              data = {}
+              for field in form["fields"]:
+                  name = field["name"]
                   if name == CSRF:
-                      continue
-                  if name in new_fields:
+                      data[CSRF] = field["value"]
+                  elif name in new_fields:
                       data[name] = new_password
                   elif name in old_fields:
                       data[name] = os.environ.get("PA_PASSWORD", "")
                   else:
-                      data[name] = form.get(name, "")
-              response = session.post(
-                  action, data=data, headers={"Referer": urljoin(base, path)}, timeout=TIMEOUT
-              )
-              if response.status_code not in (200, 302):
-                  return False, "HTTP %s" % response.status_code
-              if "errorlist" in response.text.lower():
-                  return False, "сервер отклонил значение (валидация)"
+                      data[name] = field["value"]
+
+              response = session.post(action, data=data, headers={"Referer": base + "/user/%s/account/" % username},
+                                      timeout=TIMEOUT, allow_redirects=False)
+              rec("  ответ на попытку смены: HTTP %s, Location: %s" % (
+                  response.status_code, response.headers.get("Location", "(нет)")))
+
+              if response.status_code in (301, 302, 303):
+                  follow = session.get(urljoin(base, response.headers.get("Location", "/")), timeout=TIMEOUT)
+                  rec("  после переадресации: HTTP %s, адрес %s" % (follow.status_code, follow.url.replace(base, "")))
+                  rec("  текст страницы: %s" % (relevant_lines(follow.text) or ["(ничего похожего на сообщение)"]))
+              else:
+                  rec("  текст страницы: %s" % (relevant_lines(response.text) or ["(ничего похожего на сообщение)"]))
+
               with requests.Session() as check:
-                  check.headers["User-Agent"] = "pa-restore/2.0"
-                  if not login(check, base, username, new_password):
-                      return False, "не удалось войти новым паролем"
-              return True, "успешно"
+                  check.headers["User-Agent"] = "pa-restore/2.1"
+                  if login(check, base, username, new_password):
+                      return True
+                  return False
 
 
           def main():
@@ -214,67 +220,54 @@ jobs:
               username = os.environ.get("PA_USERNAME", "").strip()
               old_password = os.environ.get("PA_PASSWORD", "")
               raw_new = os.environ.get("NEW_PA_PASSWORD", "")
-              if not username or not old_password:
-                  rec("ОШИБКА: не заданы секреты PA_USERNAME / PA_PASSWORD")
-                  return 2
-
               rec("Логин: " + username)
-              rec("Хост: " + base)
               session = requests.Session()
-              session.headers["User-Agent"] = "pa-restore/2.0"
+              session.headers["User-Agent"] = "pa-restore/2.1"
               if not login(session, base, username, old_password):
-                  rec("ОШИБКА: вход старым паролем не удался — секрет PA_PASSWORD не подходит.")
-                  rec("Значит пароль уже сменили (поддержка или вы) — нужен другой путь.")
+                  rec("ОШИБКА: вход старым паролем не удался")
                   return 3
-              rec("Вход старым паролем: успешно (пароль из секрета рабочий)")
+              rec("Вход старым паролем: успешно")
 
-              diagnose(session, base, username)
-
-              found = find_password_form(session, base, username)
-              if not found:
-                  rec("")
-                  rec("ОШИБКА: форма смены пароля не найдена автоматически.")
-                  rec("Пришлите этот отчёт — подстроим поиск под реальную вёрстку.")
-                  return 4
-              path, form, action = found
+              account_url = base + "/user/%s/account/" % username
+              page = session.get(account_url, timeout=TIMEOUT)
               rec("")
-              rec("## Смена пароля")
-              rec("Форма найдена: " + path)
+              rec("## Формы на странице аккаунта (%s -> HTTP %s)" % (account_url.replace(base, ""), page.status_code))
+              forms = parse_forms(page.text)
+              password_form = None
+              for index, form in enumerate(forms, 1):
+                  names = field_names(form)
+                  rec("  форма %d: action=%r method=%s поля=%s" % (
+                      index, form["action"], form["method"],
+                      [(f["name"], f["type"]) for f in form["fields"]]))
+                  if sum("pass" in name.lower() for name in names) >= 2:
+                      password_form = form
+              if password_form is None:
+                  rec("ОШИБКА: форма смены пароля не найдена")
+                  return 4
+              raw_action = password_form["action"].strip()
+              # action="." (как у PythonAnywhere) означает «та же страница», а urljoin сделал бы
+              # из него родительский каталог — запрос ушёл бы не туда.
+              action = account_url if raw_action in ("", ".", "./") else urljoin(account_url, raw_action)
+              rec("  форма смены пароля: action=%r -> отправляем на %s" % (raw_action, action))
 
+              rec("")
+              rec("## Попытка смены пароля")
               raw_lines = [line.strip() for line in raw_new.replace("\r", "\n").split("\n") if line.strip()]
-
-              def plausible(value):
-                  # пароль PythonAnywhere: только ASCII, разумная длина
-                  return 8 <= len(value) <= 64 and all(ord(ch) < 128 for ch in value)
-
-              candidates = [value for value in raw_lines if plausible(value)]
-              skipped = len(raw_lines) - len(candidates)
+              candidates = [v for v in raw_lines if 8 <= len(v) <= 64 and all(ord(ch) < 128 for ch in v)]
+              rec("  кандидатов: %d (длины: %s)" % (len(candidates), [len(c) for c in candidates]))
               if not candidates:
-                  rec("ОШИБКА: в секрете NEW_PA_PASSWORD нет значения, похожего на пароль")
-                  rec("(строк всего %d, отброшено %d: кириллица или длина вне 8..64)" % (len(raw_lines), skipped))
-                  rec("Проверьте секрет NEW_PA_PASSWORD: там должен быть только сам пароль.")
+                  rec("ОШИБКА: в секрете NEW_PA_PASSWORD нет подходящего значения")
                   return 5
-              rec("Кандидатов в секрете NEW_PA_PASSWORD: %d, отброшено как заметки: %d "
-                  "(пробуем по порядку, значения не печатаются)" % (len(candidates), skipped))
 
               for index, candidate in enumerate(candidates, 1):
-                  ok, detail = try_change(session, base, username, path, form, action, candidate)
-                  rec("  попытка %d (длина %d): %s" % (index, len(candidate), detail))
-                  if ok:
-                      rec("")
-                      rec("РЕЗУЛЬТАТ: пароль изменён. Использовано значение №%d из файла с паролем." % index)
-                      rec("Новый пароль = строка №%d того файла, который вы сохранили." % index)
-                      rec("")
-                      rec("Дальше вручную:")
-                      rec("1) Settings -> Secrets -> PA_PASSWORD = этот новый пароль (иначе автопродление сломается).")
-                      rec("2) Удалить секрет NEW_PA_PASSWORD.")
-                      rec("3) Удалить файл .github/workflows/restore-access.yml.")
-                      rec("4) Войти на PythonAnywhere новым паролем и посмотреть привязанную почту.")
+                  rec("  --- попытка %d (длина %d) ---" % (index, len(candidate)))
+                  if try_change(session, base, username, password_form, action, candidate):
+                      rec("РЕЗУЛЬТАТ: пароль изменён и проверен входом. Значение №%d из файла." % index)
                       return 0
+                  rec("  вход новым паролем: не удалось")
 
               rec("")
-              rec("РЕЗУЛЬТАТ: ни одно значение не подошло. Пароль не изменён.")
-              rec("Скорее всего в секрете NEW_PA_PASSWORD лишний текст или пароль не соответствует требованиям PA.")
+              rec("РЕЗУЛЬТАТ: смена пароля не удалась, пароль не изменён.")
               return 1
 
 
@@ -297,6 +290,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898382+github-actions[bot]@users.noreply.github.com"
             git add pa-restore-report.txt
-            git commit -m "chore: pa restore report" || exit 0
+            git commit -m "chore: pa restore report v2" || exit 0
+            git pull --rebase || true
             git push
           fi
